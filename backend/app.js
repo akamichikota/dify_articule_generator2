@@ -14,25 +14,21 @@ app.use(cors({
   origin: 'http://localhost:3000'  // フロントエンドのURL
 }));
 
-app.post('/generate-articles', async (req, res) => {
-  const { query } = req.body; // クエリを取得
+app.get('/generate-articles', async (req, res) => {
+  const { query } = req.query;
+  const apiKey = process.env.DIFY_API_KEY;
+  const apiEndpoint = 'http://localhost/v1/chat-messages';
 
-  const apiKey = process.env.DIFY_API_KEY;  
-  const apiEndpoint = 'http://localhost/v1/chat-messages'; // 正しいチャット用のエンドポイントに変更
-
-  console.log(`Received request to generate articles with query: ${query}`); // リクエスト受信のログ
+  console.log(`Received request to generate articles with query: ${query}`);
 
   try {
-    // キーワードを改行で分割
     const keywords = query.split(',').map(keyword => keyword.trim());
-    
-    // 各キーワードに対してAPIリクエストを並行して送信
     const requests = keywords.map(keyword => 
       axios.post(apiEndpoint, {
         inputs: {},
-        query: keyword, // 各キーワードを使用
-        response_mode: "streaming", // ストリ��ミングモードを指定
-        user: "akamichi" // ユーザーIDを指定
+        query: keyword,
+        response_mode: "streaming",
+        user: "akamichi"
       }, {
         headers: {
           'Authorization': `Bearer ${apiKey}`,
@@ -42,18 +38,19 @@ app.post('/generate-articles', async (req, res) => {
       })
     );
 
-    // 全てのリクエストが完了するのを待つ
+    res.setHeader('Content-Type', 'text/event-stream');
+    res.setHeader('Cache-Control', 'no-cache');
+    res.setHeader('Connection', 'keep-alive');
+
     const responses = await Promise.all(requests);
 
-    // 各レスポンスを処理
     responses.forEach(response => {
-      let finalMessage = '';
       let buffer = '';
 
       response.data.on('data', (chunk) => {
         buffer += chunk.toString();
         const lines = buffer.split('\n');
-        buffer = lines.pop(); // 最後の行は不完全な可能性があるのでバッファに残す
+        buffer = lines.pop();
 
         for (const line of lines) {
           if (line.startsWith('data: ')) {
@@ -61,12 +58,9 @@ app.post('/generate-articles', async (req, res) => {
             try {
               const data = JSON.parse(jsonString);
               if (data.event === 'message') {
-                finalMessage += data.answer;
+                res.write(`data: ${JSON.stringify({ answer: data.answer })}\n\n`);
               } else if (data.event === 'workflow_finished') {
-                finalMessage = data.data.outputs.answer;
-                console.log('Final Message:', finalMessage);
-                // 各キーワードの最終メッセージをフロントエンドに送信
-                res.write(JSON.stringify({ answer: finalMessage }));
+                res.write(`data: ${JSON.stringify({ answer: data.data.outputs.answer })}\n\n`);
               }
             } catch (e) {
               console.error('Error parsing JSON:', e);
@@ -76,28 +70,13 @@ app.post('/generate-articles', async (req, res) => {
       });
 
       response.data.on('end', () => {
-        if (!finalMessage) {
-          console.error('No articles generated for one of the keywords.');
-        }
+        res.write('event: end\n\n');
       });
     });
 
-    // ストリーミングレスポンスの終了
-    res.end();
-
   } catch (error) {
     console.error('Error while generating articles:', error.message);
-    if (error.response) {
-      console.error('Response data:', error.response.data);  // レスポンスの詳細をログに記録
-      console.error('Response status:', error.response.status);
-      res.status(error.response.status).json({ error: error.response.data });
-    } else if (error.request) {
-      console.error('No response received from API.');  // リクエストの詳細をログに記録
-      res.status(500).json({ error: 'No response received from API.' });
-    } else {
-      console.error('Error message:', error.message);  // エラーメッセージをログに記録
-      res.status(500).json({ error: error.message });
-    }
+    res.status(500).json({ error: error.message });
   }
 });
 
