@@ -23,70 +23,66 @@ app.post('/generate-articles', async (req, res) => {
   console.log(`Received request to generate articles with query: ${query}`); // リクエスト受信のログ
 
   try {
-    // 新しい会話を開始
-    const startConversationResponse = await axios.post(apiEndpoint, {
-      inputs: {},
-      query: query, // ユーザーからの入力
-      response_mode: "streaming", // ストリーミングモードを指定
-      user: "abc-123" // ユーザーIDを指定
-    }, {
-      headers: {
-        'Authorization': `Bearer ${apiKey}`,
-        'Content-Type': 'application/json'
-      }
-    });
-
-    // レスポンスの詳細をログに出力
-    console.log('Start Conversation Response:', startConversationResponse.data);
-
-    // レスポンス全体をログに出力
-    console.log('Full Start Conversation Response:', JSON.stringify(startConversationResponse.data, null, 2));
-
-    // 会話IDを取得
-    const conversationId = startConversationResponse.data.conversation_id || startConversationResponse.data.data.conversation_id;
-    if (!conversationId) {
-      throw new Error('Failed to retrieve conversation ID');
-    }
-    console.log(`Successfully started conversation with ID: ${conversationId}`); // 会話開始のログ
-
-    // 取得した会話IDを使用して再度リクエストを送信
+    // 記事を生成するためのリクエストを一回にまとめる
     const response = await axios.post(apiEndpoint, {
       inputs: {},
       query: query, // ユーザーからの入力
       response_mode: "streaming", // ストリーミングモードを指定
-      conversation_id: conversationId, // 会話IDを指定
       user: "abc-123" // ユーザーIDを指定
     }, {
       headers: {
         'Authorization': `Bearer ${apiKey}`,
         'Content-Type': 'application/json'
+      },
+      responseType: 'stream'
+    });
+
+    let finalMessage = '';
+    let buffer = '';
+
+    response.data.on('data', (chunk) => {
+      buffer += chunk.toString();
+      const lines = buffer.split('\n');
+      buffer = lines.pop(); // 最後の行は不完全な可能性があるのでバッファに残す
+
+      for (const line of lines) {
+        if (line.startsWith('data: ')) {
+          const jsonString = line.replace(/^data: /, '');
+          try {
+            const data = JSON.parse(jsonString);
+            if (data.event === 'message') {
+              finalMessage += data.answer;
+            } else if (data.event === 'workflow_finished') {
+              const finalMessage = data.data.outputs.answer;
+              console.log('Final Message:', finalMessage);
+              res.json({ answer: finalMessage });
+            }
+          } catch (e) {
+            console.error('Error parsing JSON:', e);
+          }
+        }
       }
     });
 
-    // レスポンスの詳細をログに出力
-    console.log('Generate Articles Response:', response.data);
+    response.data.on('end', () => {
+      if (!finalMessage) {
+        res.status(500).json({ error: 'No articles generated.' });
+      }
+    });
 
-    console.log(`Successfully generated articles for conversation ID: ${conversationId}`); // 記事生成成功のログ
-
-    // 最終的なメッセージのみを返す
-    if (response.data && response.data.outputs && response.data.outputs.answer) {
-      const finalMessage = response.data.outputs.answer; // 最後のメッセージを取得
-      res.json({ answer: finalMessage }); // 最終的なメッセージを返す
-    } else {
-      res.status(500).json({ error: 'No articles generated.' });
-    }
   } catch (error) {
     console.error('Error while generating articles:', error.message);
     if (error.response) {
       console.error('Response data:', error.response.data);  // レスポンスの詳細をログに記録
       console.error('Response status:', error.response.status);
-      console.error('Response headers:', error.response.headers);
+      res.status(error.response.status).json({ error: error.response.data });
     } else if (error.request) {
-      console.error('Request data:', error.request);  // リクエストの詳細をログに記録
+      console.error('No response received from API.');  // リクエストの詳細をログに記録
+      res.status(500).json({ error: 'No response received from API.' });
     } else {
       console.error('Error message:', error.message);  // エラーメッセージをログに記録
+      res.status(500).json({ error: error.message });
     }
-    res.status(500).json({ error: 'An error occurred while generating articles.' });
   }
 });
 

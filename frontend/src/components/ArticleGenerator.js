@@ -5,6 +5,7 @@ const ArticleGenerator = () => {
   const [keywordsText, setKeywordsText] = useState('');
   const [articles, setArticles] = useState([]);
   const [loading, setLoading] = useState(false);
+  const [error, setError] = useState(null);
 
   const handleChange = (event) => {
     setKeywordsText(event.target.value);
@@ -12,6 +13,7 @@ const ArticleGenerator = () => {
 
   const generateArticles = async () => {
     setLoading(true);
+    setError(null);
     const keywords = keywordsText.split('\n').filter(keyword => keyword.trim() !== '');
     try {
       const response = await axios.post('http://localhost:3030/generate-articles', { 
@@ -28,6 +30,7 @@ const ArticleGenerator = () => {
       }
     } catch (error) {
       console.error('Error:', error);
+      setError(error.response ? error.response.data.error : 'An error occurred.');
     } finally {
       setLoading(false);
     }
@@ -46,6 +49,7 @@ const ArticleGenerator = () => {
       <button onClick={generateArticles} disabled={loading}>
         {loading ? 'Generating...' : 'Generate Articles'}
       </button>
+      {error && <p style={{ color: 'red' }}>{error}</p>}
       <div>
         {articles.length > 0 ? (
           articles.map((article, index) => (
