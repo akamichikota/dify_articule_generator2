@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import axios from 'axios';
+import ReactMarkdown from 'react-markdown';
 
 const ArticleGenerator = () => {
   const [keywordsText, setKeywordsText] = useState('');
@@ -16,23 +16,32 @@ const ArticleGenerator = () => {
     setError(null);
     const keywords = keywordsText.split('\n').filter(keyword => keyword.trim() !== '');
     try {
-      const response = await axios.post('http://localhost:3030/generate-articles', { 
-        query: keywords.join(', ')
+      const response = await fetch('http://localhost:3030/generate-articles', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ query: keywords.join(', ') }),
       });
-      
-      console.log(response.data); // APIからのレスポンスを確認
 
-      // 最終的なメッセージのみを返す
-      if (response.data && response.data.answer) {
-        setArticles([{ answer: response.data.answer }]); // answerを含むオブジェクトを配列にラップして設定
-      } else {
-        setArticles([{ answer: 'No articles generated.' }]); // エラーメッセージを設定
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder('utf-8');
+      let done = false;
+
+      while (!done) {
+        const { value, done: doneReading } = await reader.read();
+        done = doneReading;
+        const chunk = decoder.decode(value, { stream: true });
+        const articlesChunk = chunk.split('\n').filter(line => line).map(line => JSON.parse(line));
+        
+        // 受け取った記事を順に表示
+        setArticles(prevArticles => [...prevArticles, ...articlesChunk.map(article => ({ answer: article.answer }))]);
       }
     } catch (error) {
       console.error('Error:', error);
-      setError(error.response ? error.response.data.error : 'An error occurred.');
+      setError('An error occurred while generating articles.');
     } finally {
-      setLoading(false);
+      setLoading(false); // エラーが発生してもここでloadingをfalseにする
     }
   };
 
@@ -47,19 +56,19 @@ const ArticleGenerator = () => {
       />
       <br />
       <button onClick={generateArticles} disabled={loading}>
-        {loading ? 'Generating...' : 'Generate Articles'}
+        {loading ? '生成中...' : '記事生成'}
       </button>
       {error && <p style={{ color: 'red' }}>{error}</p>}
+      <h2>記事内容</h2>
       <div>
         {articles.length > 0 ? (
           articles.map((article, index) => (
-            <div key={index}>
-              <h2>Article</h2>
-              <p>{article.answer}</p> {/* 最終的なメッセージを表示 */}
+            <div key={index} style={{ marginBottom: '20px', border: '1px solid #ccc', padding: '10px' }}>
+              <ReactMarkdown>{article.answer}</ReactMarkdown>
             </div>
           ))
         ) : (
-          <p>No articles generated.</p> // 記事が生成されていない場合のメッセージ
+          null
         )}
       </div>
     </div>

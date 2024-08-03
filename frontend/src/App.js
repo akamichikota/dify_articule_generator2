@@ -5,7 +5,7 @@ function App() {
   return (
     <div className="App">
       <header className="App-header">
-        <h1>Article Generator</h1>
+        <h1>自動記事生成ツール</h1>
         <ArticleGenerator />
       </header>
     </div>
